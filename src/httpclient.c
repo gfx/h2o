@@ -52,7 +52,16 @@ struct {
     } headers[256];
     size_t num_headers;
     size_t body_size;
-} req = {NULL, "GET"};
+} req = {
+    .method = "GET",
+    .headers = {
+        {
+            .name = { H2O_STRLIT("user-agent") },
+            .value = { H2O_STRLIT("h2o-httpclient/" H2O_VERSION) },
+        }
+    },
+    .num_headers = 1,
+};
 static int cnt_left = 1;
 static size_t cur_req_body_size = 0;
 static int chunk_size = 10;
