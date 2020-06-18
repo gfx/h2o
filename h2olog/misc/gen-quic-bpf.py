@@ -20,13 +20,33 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 
-# usage: gen-quic-bpf.py d_files_dir output_file
+# usage: gen-quic-bpf.py h2o_dir output_file
 
 import re
 import sys
 from collections import OrderedDict
 from pathlib import Path
 from pprint import pprint
+
+struct_map = {
+    # deps/quicly/include/quicly.h
+    "st_quicly_stream_t": OrderedDict([
+        ("stream_id", ("quicly_stream_id_t", None)),
+    ]),
+
+    # deps/quicly/include/quicly/loss.h
+    "quicly_rtt_t": OrderedDict([
+        ("minimum", ("uint32_t", None)),
+        ("smoothed", ("uint32_t", None)),
+        ("variance", ("uint32_t", None)),
+        ("latest", ("uint32_t", None)),
+    ]),
+
+    # deps/quicly/lib/quicly.c
+    "st_quicly_conn_t": OrderedDict([
+        ("master_id", ("uint32_t", "local.cid_set.plaintext.master_id")),
+    ]),
+}
 
 block_fields = {
     "quicly:crypto_decrypt": set(["decrypted"]),
@@ -65,41 +85,25 @@ rename_map = {
     "latest": "latest-rtt",
 }
 
-data_types_h = Path(Path(__file__).parent.parent, "quic.h")
-
-re_flags = re.X | re.M | re.S
+re_xms = re.X | re.M | re.S
 whitespace = r'(?:/\*.*?\*/|\s+)'
 probe_decl = r'(?:\bprobe\s+(?:[a-zA-Z0-9_]+)\s*\([^\)]*\)\s*;)'
 d_decl = r'(?:\bprovider\s*(?P<provider>[a-zA-Z0-9_]+)\s*\{(?P<probes>(?:%s|%s)*)\})' % (
     probe_decl, whitespace)
 
 
-def parse_c_struct(path):
-  content = path.read_text()
-
-  st_map = OrderedDict()
-  for (st_name, st_content) in re.findall(r'struct\s+([a-zA-Z0-9_]+)\s*\{([^}]*)\}', content, flags=re_flags):
-    st = st_map[st_name] = OrderedDict()
-    for (ctype, name, is_array) in re.findall(r'(\w+[^;]*[\w\*])\s+([a-zA-Z0-9_]+)(\[\d+\])?;', st_content, flags=re_flags):
-      if "dummy" in name:
-        continue
-      st[name] = ctype + is_array
-  return st_map
-
-
 def parse_d(context: dict, path: Path, allow_probes: set = None, block_probes: set = None):
   content = path.read_text()
 
-  matched = re.search(d_decl, content, flags=re_flags)
+  matched = re.search(d_decl, content, flags=re_xms)
   provider = matched.group('provider')
 
-  st_map = context["st_map"]
   probe_metadata = context["probe_metadata"]
 
   id = context["id"]
 
-  for (name, args) in re.findall(r'\bprobe\s+([a-zA-Z0-9_]+)\(([^\)]+)\);', matched.group('probes'), flags=re_flags):
-    arg_list = re.split(r'\s*,\s*', args, flags=re_flags)
+  for (name, args) in re.findall(r'\bprobe\s+([a-zA-Z0-9_]+)\(([^\)]+)\);', matched.group('probes'), flags=re_xms):
+    arg_list = re.split(r'\s*,\s*', args, flags=re_xms)
     id += 1
 
     fully_specified_probe_name = "%s:%s" % (provider, name)
@@ -117,7 +121,7 @@ def parse_d(context: dict, path: Path, allow_probes: set = None, block_probes: s
     probe_metadata[name] = metadata
     args = metadata['args'] = list(map(
         lambda arg: re.match(
-            r'(?P<type>\w[^;]*[^;\s])\s*\b(?P<name>[a-zA-Z0-9_]+)', arg, flags=re_flags).groupdict(),
+            r'(?P<type>\w[^;]*[^;\s])\s*\b(?P<name>[a-zA-Z0-9_]+)', arg, flags=re_xms).groupdict(),
         arg_list))
 
     flat_args_map = metadata['flat_args_map'] = OrderedDict()
@@ -127,8 +131,8 @@ def parse_d(context: dict, path: Path, allow_probes: set = None, block_probes: s
       arg_type = arg['type']
 
       if is_ptr_type(arg_type) and not is_str_type(arg_type):
-        for st_key, st_valtype in st_map[strip_typename(arg_type)].items():
-          flat_args_map[st_key] = st_valtype
+        for st_event_fieldname, (st_fieldtype, _) in struct_map.get(strip_typename(arg_type), {}).items():
+          flat_args_map[st_event_fieldname] = st_fieldtype
       else:
         flat_args_map[arg_name] = arg_type
 
@@ -156,7 +160,6 @@ def build_tracer_name(metadata):
 
 
 def build_tracer(context, metadata):
-  st_map = context["st_map"]
   fully_specified_probe_name = metadata["fully_specified_probe_name"]
 
   c = r"""// %s
@@ -191,10 +194,12 @@ int %s(struct pt_regs *ctx) {
       c += "  %s %s = {};\n" % (arg_type.replace("*", ""), arg_name)
       c += "  bpf_usdt_readarg(%d, ctx, &buf);\n" % (i+1)
       c += "  bpf_probe_read(&%s, sizeof(%s), buf);\n" % (arg_name, arg_name)
-      for st_key, st_valtype in st_map[strip_typename(arg_type)].items():
-        event_t_name = "%s.%s" % (probe_name, st_key)
+      for st_fieldname, (st_fieldtype, st_real_fieldname) in struct_map.get(strip_typename(arg_type), {}).items():
+        if not st_real_fieldname:
+          st_real_fieldname = st_fieldname
+        event_t_name = "%s.%s" % (probe_name, st_fieldname)
         c += "  event.%s = %s.%s; /* %s */\n" % (
-            event_t_name, arg_name, st_key, st_valtype)
+            event_t_name, arg_name, st_real_fieldname, st_fieldtype)
     else:
       event_t_name = "%s.%s" % (probe_name, arg_name)
       c += "  bpf_usdt_readarg(%d, ctx, &event.%s);\n" % (i +
@@ -240,16 +245,14 @@ int %s(struct pt_regs *ctx) {
   return c
 
 
-def prepare_context(d_files_dir):
-  st_map = parse_c_struct(data_types_h)
+def prepare_context(h2o_dir):
   context = {
       "id": 1,  # 1 is used for sched:sched_process_exit
       "probe_metadata": OrderedDict(),
-      "st_map": st_map,
   }
-  parse_d(context, Path(d_files_dir, "quicly-probes.d"),
+  parse_d(context, Path(h2o_dir, "deps/quicly/quicly-probes.d"),
           block_probes=quicly_block_probes)
-  parse_d(context, Path(d_files_dir, "h2o-probes.d"),
+  parse_d(context, Path(h2o_dir, "h2o-probes.d"),
           allow_probes=h2o_allow_probes)
 
   return context
@@ -297,8 +300,10 @@ struct quic_event_t {
   bpf = r"""
 #include <linux/sched.h>
 
+#include <quicly.h>
+
 #define STR_LEN 64
-%s
+
 %s
 BPF_PERF_OUTPUT(events);
 
@@ -318,7 +323,7 @@ int trace_sched_process_exit(struct tracepoint__sched__sched_process_exit *ctx) 
   return 0;
 }
 
-""" % (data_types_h.read_text(), event_t_decl)
+""" % (event_t_decl)
 
   usdt_def = """
 static
@@ -412,8 +417,10 @@ void quic_handle_event(h2o_tracer_t *tracer, const void *data, int data_len) {
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
+
+#include "quicly.h"
+
 #include "h2olog.h"
-#include "quic.h"
 #include "json.h"
 
 #define STR_LEN 64
@@ -422,9 +429,9 @@ void quic_handle_event(h2o_tracer_t *tracer, const void *data, int data_len) {
 uint64_t seq = 0;
 
 // BPF modules written in C
-const char *bpf_text = R"(
+const char *bpf_text = R"__bfp__(
 %s
-)";
+)__bfp__";
 
 static uint64_t time_milliseconds()
 {
@@ -463,12 +470,12 @@ void init_quic_tracer(h2o_tracer_t * tracer) {
 
 def main():
   try:
-    (_, d_files_dir, output_file) = sys.argv
+    (_, h2o_dir, output_file) = sys.argv
   except:
-    print("usage: %s d_files_dir output_file" % sys.argv[0])
+    print("usage: %s h2o_dir output_file" % sys.argv[0])
     sys.exit(1)
 
-  context = prepare_context(d_files_dir)
+  context = prepare_context(h2o_dir)
   generate_cplusplus(context, output_file)
 
 

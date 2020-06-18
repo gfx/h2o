@@ -883,29 +883,42 @@ OPTION(WITH_H2OLOG "use h2olog command" ${WITH_H2OLOG_DEFAULT})
 IF (WITH_H2OLOG)
     MESSAGE(STATUS "Supporting h2olog")
 
+    # BPF is parsed by clang
+    IF (DEFINED ENV{CLANG})
+        SET(CLANG $ENV{CLANG})
+    ELSEIF (NOT DEFINED CLANG)
+        SET(CLANG "clang")
+    ENDIF ()
+
     SET(H2OLOG_SOURCE_FILES
         "h2olog/h2olog.h"
         "h2olog/h2olog.cc"
         "h2olog/http.cc"
         "h2olog/json.h"
         "h2olog/json.cc"
-        "h2olog/quic.h"
         "include/h2o/version.h"
     )
 
-    FILE(COPY "deps/quicly/quicly-probes.d" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
-    LIST(APPEND H2OLOG_DTRACE_FILES "${CMAKE_CURRENT_BINARY_DIR}/quicly-probes.d")
-
-    FILE(COPY "h2o-probes.d" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
-    LIST(APPEND H2OLOG_DTRACE_FILES "${CMAKE_CURRENT_BINARY_DIR}/h2o-probes.d")
-
+    SET(H2OLOG_GEN_DEPS
+        "${CMAKE_CURRENT_SOURCE_DIR}/deps/quicly/include/quicly.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/deps/quicly/quicly-probes.d"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/h2o.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/h2o-probes.d"
+    )
     ADD_CUSTOM_COMMAND(
         OUTPUT  "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/generated-quic.cc"
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/misc/gen-quic-bpf.py" "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/generated-quic.cc"
-        DEPENDS "${DTRACE_FILES}"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/misc/gen-quic-bpf.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/generated-quic.cc"
+        DEPENDS "${H2OLOG_GEN_DEPS}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/misc/gen-quic-bpf.py"
     )
-    LIST(APPEND H2OLOG_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/generated-quic.cc")
+    ADD_CUSTOM_COMMAND(
+        OUTPUT  "${CMAKE_CURRENT_BINARY_DIR}/h2olog-generated-quic.cc"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/misc/expand-quicly_h.py" "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/generated-quic.cc" "${CMAKE_CURRENT_BINARY_DIR}/h2olog-generated-quic.cc" "${CLANG} -E -I${CMAKE_CURRENT_SOURCE_DIR}/deps/quicly/include -I${CMAKE_CURRENT_SOURCE_DIR}/deps/picotls/include ${CMAKE_CXX_FLAGS} ${CMAKE_CURRENT_SOURCE_DIR}/deps/quicly/include/quicly.h"
+        VERBATIM
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/generated-quic.cc"
+    )
+    LIST(APPEND H2OLOG_SOURCE_FILES "${CMAKE_CURRENT_BINARY_DIR}/h2olog-generated-quic.cc")
+
     LINK_DIRECTORIES("${LIBBCC_LIBRARY_DIRS}")
 
     ADD_EXECUTABLE(h2olog ${H2OLOG_SOURCE_FILES})

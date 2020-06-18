@@ -5,8 +5,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
+
+#include "quicly.h"
+
 #include "h2olog.h"
-#include "quic.h"
 #include "json.h"
 
 #define STR_LEN 64
@@ -15,66 +17,13 @@
 uint64_t seq = 0;
 
 // BPF modules written in C
-const char *bpf_text = R"(
+const char *bpf_text = R"__bfp__(
 
 #include <linux/sched.h>
 
+#include <quicly.h>
+
 #define STR_LEN 64
-/*
- * Copyright (c) 2019-2020 Fastly, Inc., Toru Maesaka, Goro Fuji
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal in the Software without restriction, including without limitation the
- * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
- * sell copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- * IN THE SOFTWARE.
- */
-
-#ifndef H2OLOG_QUIC_H
-#define H2OLOG_QUIC_H
-
-/*
- * These structs mirror H2O's internal structs. As the name suggests, dummy
- * fields are paddings that are ignored.
- */
-struct st_quicly_stream_t {
-    uint64_t dummy;
-    int64_t stream_id;
-};
-
-struct st_quicly_conn_t {
-    uint32_t dummy[4];
-    uint32_t master_id;
-};
-
-struct quicly_rtt_t {
-    uint32_t minimum;
-    uint32_t smoothed;
-    uint32_t variance;
-    uint32_t latest;
-};
-
-struct st_quicly_address_token_plaintext_t {
-    int dummy;
-};
-
-struct st_h2o_conn_t {
-    int dummy;
-};
-
-#endif
 
 
 struct quic_event_t {
@@ -248,7 +197,7 @@ struct quic_event_t {
     struct { // quicly:stream_send
       uint32_t master_id;
       int64_t at;
-      int64_t stream_id;
+      quicly_stream_id_t stream_id;
       uint64_t off;
       size_t len;
       int is_fin;
@@ -256,7 +205,7 @@ struct quic_event_t {
     struct { // quicly:stream_receive
       uint32_t master_id;
       int64_t at;
-      int64_t stream_id;
+      quicly_stream_id_t stream_id;
       uint64_t off;
       size_t len;
     } stream_receive;
@@ -299,7 +248,7 @@ struct quic_event_t {
     struct { // quicly:max_stream_data_send
       uint32_t master_id;
       int64_t at;
-      int64_t stream_id;
+      quicly_stream_id_t stream_id;
       uint64_t limit;
     } max_stream_data_send;
     struct { // quicly:max_stream_data_receive
@@ -406,7 +355,7 @@ struct quic_event_t {
     struct { // quicly:quictrace_send_stream
       uint32_t master_id;
       int64_t at;
-      int64_t stream_id;
+      quicly_stream_id_t stream_id;
       uint64_t off;
       size_t len;
       int fin;
@@ -503,7 +452,7 @@ int trace_quicly__connect(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.connect.master_id = conn.master_id; /* uint32_t */
+  event.connect.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.connect.at);
   // uint32_t version
@@ -523,7 +472,7 @@ int trace_quicly__accept(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.accept.master_id = conn.master_id; /* uint32_t */
+  event.accept.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.accept.at);
   // const char * dcid
@@ -548,7 +497,7 @@ int trace_quicly__free(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.free.master_id = conn.master_id; /* uint32_t */
+  event.free.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.free.at);
 
@@ -566,7 +515,7 @@ int trace_quicly__send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.send.master_id = conn.master_id; /* uint32_t */
+  event.send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.send.at);
   // int state
@@ -589,7 +538,7 @@ int trace_quicly__receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.receive.master_id = conn.master_id; /* uint32_t */
+  event.receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.receive.at);
   // const char * dcid
@@ -615,7 +564,7 @@ int trace_quicly__version_switch(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.version_switch.master_id = conn.master_id; /* uint32_t */
+  event.version_switch.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.version_switch.at);
   // uint32_t new_version
@@ -635,7 +584,7 @@ int trace_quicly__idle_timeout(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.idle_timeout.master_id = conn.master_id; /* uint32_t */
+  event.idle_timeout.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.idle_timeout.at);
 
@@ -653,7 +602,7 @@ int trace_quicly__stateless_reset_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.stateless_reset_receive.master_id = conn.master_id; /* uint32_t */
+  event.stateless_reset_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.stateless_reset_receive.at);
 
@@ -671,7 +620,7 @@ int trace_quicly__crypto_decrypt(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.crypto_decrypt.master_id = conn.master_id; /* uint32_t */
+  event.crypto_decrypt.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.crypto_decrypt.at);
   // uint64_t pn
@@ -694,7 +643,7 @@ int trace_quicly__crypto_handshake(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.crypto_handshake.master_id = conn.master_id; /* uint32_t */
+  event.crypto_handshake.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.crypto_handshake.at);
   // int ret
@@ -714,7 +663,7 @@ int trace_quicly__crypto_update_secret(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.crypto_update_secret.master_id = conn.master_id; /* uint32_t */
+  event.crypto_update_secret.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.crypto_update_secret.at);
   // int is_enc
@@ -740,7 +689,7 @@ int trace_quicly__crypto_send_key_update(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.crypto_send_key_update.master_id = conn.master_id; /* uint32_t */
+  event.crypto_send_key_update.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.crypto_send_key_update.at);
   // uint64_t phase
@@ -761,7 +710,7 @@ int trace_quicly__crypto_send_key_update_confirmed(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.crypto_send_key_update_confirmed.master_id = conn.master_id; /* uint32_t */
+  event.crypto_send_key_update_confirmed.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.crypto_send_key_update_confirmed.at);
   // uint64_t next_pn
@@ -781,7 +730,7 @@ int trace_quicly__crypto_receive_key_update(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.crypto_receive_key_update.master_id = conn.master_id; /* uint32_t */
+  event.crypto_receive_key_update.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.crypto_receive_key_update.at);
   // uint64_t phase
@@ -802,7 +751,7 @@ int trace_quicly__crypto_receive_key_update_prepare(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.crypto_receive_key_update_prepare.master_id = conn.master_id; /* uint32_t */
+  event.crypto_receive_key_update_prepare.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.crypto_receive_key_update_prepare.at);
   // uint64_t phase
@@ -823,7 +772,7 @@ int trace_quicly__packet_prepare(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.packet_prepare.master_id = conn.master_id; /* uint32_t */
+  event.packet_prepare.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.packet_prepare.at);
   // uint8_t first_octet
@@ -846,7 +795,7 @@ int trace_quicly__packet_commit(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.packet_commit.master_id = conn.master_id; /* uint32_t */
+  event.packet_commit.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.packet_commit.at);
   // uint64_t pn
@@ -870,7 +819,7 @@ int trace_quicly__packet_acked(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.packet_acked.master_id = conn.master_id; /* uint32_t */
+  event.packet_acked.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.packet_acked.at);
   // uint64_t pn
@@ -892,7 +841,7 @@ int trace_quicly__packet_lost(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.packet_lost.master_id = conn.master_id; /* uint32_t */
+  event.packet_lost.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.packet_lost.at);
   // uint64_t pn
@@ -912,7 +861,7 @@ int trace_quicly__pto(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.pto.master_id = conn.master_id; /* uint32_t */
+  event.pto.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.pto.at);
   // size_t inflight
@@ -936,7 +885,7 @@ int trace_quicly__cc_ack_received(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.cc_ack_received.master_id = conn.master_id; /* uint32_t */
+  event.cc_ack_received.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.cc_ack_received.at);
   // uint64_t largest_acked
@@ -962,7 +911,7 @@ int trace_quicly__cc_congestion(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.cc_congestion.master_id = conn.master_id; /* uint32_t */
+  event.cc_congestion.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.cc_congestion.at);
   // uint64_t max_lost_pn
@@ -986,7 +935,7 @@ int trace_quicly__ack_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.ack_send.master_id = conn.master_id; /* uint32_t */
+  event.ack_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.ack_send.at);
   // uint64_t largest_acked
@@ -1008,7 +957,7 @@ int trace_quicly__ping_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.ping_send.master_id = conn.master_id; /* uint32_t */
+  event.ping_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.ping_send.at);
 
@@ -1026,7 +975,7 @@ int trace_quicly__ping_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.ping_receive.master_id = conn.master_id; /* uint32_t */
+  event.ping_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.ping_receive.at);
 
@@ -1044,7 +993,7 @@ int trace_quicly__transport_close_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.transport_close_send.master_id = conn.master_id; /* uint32_t */
+  event.transport_close_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.transport_close_send.at);
   // uint64_t error_code
@@ -1069,7 +1018,7 @@ int trace_quicly__transport_close_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.transport_close_receive.master_id = conn.master_id; /* uint32_t */
+  event.transport_close_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.transport_close_receive.at);
   // uint64_t error_code
@@ -1094,7 +1043,7 @@ int trace_quicly__application_close_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.application_close_send.master_id = conn.master_id; /* uint32_t */
+  event.application_close_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.application_close_send.at);
   // uint64_t error_code
@@ -1117,7 +1066,7 @@ int trace_quicly__application_close_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.application_close_receive.master_id = conn.master_id; /* uint32_t */
+  event.application_close_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.application_close_receive.at);
   // uint64_t error_code
@@ -1140,14 +1089,14 @@ int trace_quicly__stream_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.stream_send.master_id = conn.master_id; /* uint32_t */
+  event.stream_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.stream_send.at);
   // struct st_quicly_stream_t * stream
   struct st_quicly_stream_t  stream = {};
   bpf_usdt_readarg(3, ctx, &buf);
   bpf_probe_read(&stream, sizeof(stream), buf);
-  event.stream_send.stream_id = stream.stream_id; /* int64_t */
+  event.stream_send.stream_id = stream.stream_id; /* quicly_stream_id_t */
   // uint64_t off
   bpf_usdt_readarg(4, ctx, &event.stream_send.off);
   // size_t len
@@ -1169,14 +1118,14 @@ int trace_quicly__stream_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.stream_receive.master_id = conn.master_id; /* uint32_t */
+  event.stream_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.stream_receive.at);
   // struct st_quicly_stream_t * stream
   struct st_quicly_stream_t  stream = {};
   bpf_usdt_readarg(3, ctx, &buf);
   bpf_probe_read(&stream, sizeof(stream), buf);
-  event.stream_receive.stream_id = stream.stream_id; /* int64_t */
+  event.stream_receive.stream_id = stream.stream_id; /* quicly_stream_id_t */
   // uint64_t off
   bpf_usdt_readarg(4, ctx, &event.stream_receive.off);
   // size_t len
@@ -1196,7 +1145,7 @@ int trace_quicly__stream_acked(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.stream_acked.master_id = conn.master_id; /* uint32_t */
+  event.stream_acked.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.stream_acked.at);
   // int64_t stream_id
@@ -1220,7 +1169,7 @@ int trace_quicly__stream_lost(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.stream_lost.master_id = conn.master_id; /* uint32_t */
+  event.stream_lost.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.stream_lost.at);
   // int64_t stream_id
@@ -1244,7 +1193,7 @@ int trace_quicly__max_data_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.max_data_send.master_id = conn.master_id; /* uint32_t */
+  event.max_data_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.max_data_send.at);
   // uint64_t limit
@@ -1264,7 +1213,7 @@ int trace_quicly__max_data_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.max_data_receive.master_id = conn.master_id; /* uint32_t */
+  event.max_data_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.max_data_receive.at);
   // uint64_t limit
@@ -1284,7 +1233,7 @@ int trace_quicly__max_streams_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.max_streams_send.master_id = conn.master_id; /* uint32_t */
+  event.max_streams_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.max_streams_send.at);
   // uint64_t limit
@@ -1306,7 +1255,7 @@ int trace_quicly__max_streams_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.max_streams_receive.master_id = conn.master_id; /* uint32_t */
+  event.max_streams_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.max_streams_receive.at);
   // uint64_t limit
@@ -1328,14 +1277,14 @@ int trace_quicly__max_stream_data_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.max_stream_data_send.master_id = conn.master_id; /* uint32_t */
+  event.max_stream_data_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.max_stream_data_send.at);
   // struct st_quicly_stream_t * stream
   struct st_quicly_stream_t  stream = {};
   bpf_usdt_readarg(3, ctx, &buf);
   bpf_probe_read(&stream, sizeof(stream), buf);
-  event.max_stream_data_send.stream_id = stream.stream_id; /* int64_t */
+  event.max_stream_data_send.stream_id = stream.stream_id; /* quicly_stream_id_t */
   // uint64_t limit
   bpf_usdt_readarg(4, ctx, &event.max_stream_data_send.limit);
 
@@ -1353,7 +1302,7 @@ int trace_quicly__max_stream_data_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.max_stream_data_receive.master_id = conn.master_id; /* uint32_t */
+  event.max_stream_data_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.max_stream_data_receive.at);
   // int64_t stream_id
@@ -1375,7 +1324,7 @@ int trace_quicly__new_token_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.new_token_send.master_id = conn.master_id; /* uint32_t */
+  event.new_token_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.new_token_send.at);
   // uint8_t * token
@@ -1400,7 +1349,7 @@ int trace_quicly__new_token_acked(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.new_token_acked.master_id = conn.master_id; /* uint32_t */
+  event.new_token_acked.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.new_token_acked.at);
   // uint64_t generation
@@ -1420,7 +1369,7 @@ int trace_quicly__new_token_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.new_token_receive.master_id = conn.master_id; /* uint32_t */
+  event.new_token_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.new_token_receive.at);
   // uint8_t * token
@@ -1443,7 +1392,7 @@ int trace_quicly__handshake_done_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.handshake_done_send.master_id = conn.master_id; /* uint32_t */
+  event.handshake_done_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.handshake_done_send.at);
 
@@ -1461,7 +1410,7 @@ int trace_quicly__handshake_done_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.handshake_done_receive.master_id = conn.master_id; /* uint32_t */
+  event.handshake_done_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.handshake_done_receive.at);
 
@@ -1479,7 +1428,7 @@ int trace_quicly__streams_blocked_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.streams_blocked_send.master_id = conn.master_id; /* uint32_t */
+  event.streams_blocked_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.streams_blocked_send.at);
   // uint64_t limit
@@ -1501,7 +1450,7 @@ int trace_quicly__streams_blocked_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.streams_blocked_receive.master_id = conn.master_id; /* uint32_t */
+  event.streams_blocked_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.streams_blocked_receive.at);
   // uint64_t limit
@@ -1523,7 +1472,7 @@ int trace_quicly__new_connection_id_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.new_connection_id_send.master_id = conn.master_id; /* uint32_t */
+  event.new_connection_id_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.new_connection_id_send.at);
   // uint64_t sequence
@@ -1551,7 +1500,7 @@ int trace_quicly__new_connection_id_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.new_connection_id_receive.master_id = conn.master_id; /* uint32_t */
+  event.new_connection_id_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.new_connection_id_receive.at);
   // uint64_t sequence
@@ -1579,7 +1528,7 @@ int trace_quicly__retire_connection_id_send(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.retire_connection_id_send.master_id = conn.master_id; /* uint32_t */
+  event.retire_connection_id_send.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.retire_connection_id_send.at);
   // uint64_t sequence
@@ -1599,7 +1548,7 @@ int trace_quicly__retire_connection_id_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.retire_connection_id_receive.master_id = conn.master_id; /* uint32_t */
+  event.retire_connection_id_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.retire_connection_id_receive.at);
   // uint64_t sequence
@@ -1619,7 +1568,7 @@ int trace_quicly__data_blocked_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.data_blocked_receive.master_id = conn.master_id; /* uint32_t */
+  event.data_blocked_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.data_blocked_receive.at);
   // uint64_t off
@@ -1639,7 +1588,7 @@ int trace_quicly__stream_data_blocked_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.stream_data_blocked_receive.master_id = conn.master_id; /* uint32_t */
+  event.stream_data_blocked_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.stream_data_blocked_receive.at);
   // int64_t stream_id
@@ -1661,7 +1610,7 @@ int trace_quicly__ack_frequency_receive(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.ack_frequency_receive.master_id = conn.master_id; /* uint32_t */
+  event.ack_frequency_receive.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.ack_frequency_receive.at);
   // uint64_t sequence
@@ -1687,7 +1636,7 @@ int trace_quicly__quictrace_sent(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.quictrace_sent.master_id = conn.master_id; /* uint32_t */
+  event.quictrace_sent.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.quictrace_sent.at);
   // uint64_t pn
@@ -1711,7 +1660,7 @@ int trace_quicly__quictrace_recv(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.quictrace_recv.master_id = conn.master_id; /* uint32_t */
+  event.quictrace_recv.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.quictrace_recv.at);
   // uint64_t pn
@@ -1731,14 +1680,14 @@ int trace_quicly__quictrace_send_stream(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.quictrace_send_stream.master_id = conn.master_id; /* uint32_t */
+  event.quictrace_send_stream.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.quictrace_send_stream.at);
   // struct st_quicly_stream_t * stream
   struct st_quicly_stream_t  stream = {};
   bpf_usdt_readarg(3, ctx, &buf);
   bpf_probe_read(&stream, sizeof(stream), buf);
-  event.quictrace_send_stream.stream_id = stream.stream_id; /* int64_t */
+  event.quictrace_send_stream.stream_id = stream.stream_id; /* quicly_stream_id_t */
   // uint64_t off
   bpf_usdt_readarg(4, ctx, &event.quictrace_send_stream.off);
   // size_t len
@@ -1760,7 +1709,7 @@ int trace_quicly__quictrace_recv_stream(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.quictrace_recv_stream.master_id = conn.master_id; /* uint32_t */
+  event.quictrace_recv_stream.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.quictrace_recv_stream.at);
   // int64_t stream_id
@@ -1786,7 +1735,7 @@ int trace_quicly__quictrace_recv_ack(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.quictrace_recv_ack.master_id = conn.master_id; /* uint32_t */
+  event.quictrace_recv_ack.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.quictrace_recv_ack.at);
   // uint64_t ack_block_begin
@@ -1808,7 +1757,7 @@ int trace_quicly__quictrace_recv_ack_delay(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.quictrace_recv_ack_delay.master_id = conn.master_id; /* uint32_t */
+  event.quictrace_recv_ack_delay.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.quictrace_recv_ack_delay.at);
   // int64_t ack_delay
@@ -1828,7 +1777,7 @@ int trace_quicly__quictrace_lost(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.quictrace_lost.master_id = conn.master_id; /* uint32_t */
+  event.quictrace_lost.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.quictrace_lost.at);
   // uint64_t pn
@@ -1848,7 +1797,7 @@ int trace_quicly__quictrace_cc_ack(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.quictrace_cc_ack.master_id = conn.master_id; /* uint32_t */
+  event.quictrace_cc_ack.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.quictrace_cc_ack.at);
   // struct quicly_rtt_t * rtt
@@ -1878,7 +1827,7 @@ int trace_quicly__quictrace_cc_lost(struct pt_regs *ctx) {
   struct st_quicly_conn_t  conn = {};
   bpf_usdt_readarg(1, ctx, &buf);
   bpf_probe_read(&conn, sizeof(conn), buf);
-  event.quictrace_cc_lost.master_id = conn.master_id; /* uint32_t */
+  event.quictrace_cc_lost.master_id = conn.local.cid_set.plaintext.master_id; /* uint32_t */
   // int64_t at
   bpf_usdt_readarg(2, ctx, &event.quictrace_cc_lost.at);
   // struct quicly_rtt_t * rtt
@@ -1911,7 +1860,7 @@ int trace_h2o__h3_accept(struct pt_regs *ctx) {
   struct st_quicly_conn_t  quic = {};
   bpf_usdt_readarg(3, ctx, &buf);
   bpf_probe_read(&quic, sizeof(quic), buf);
-  event.h3_accept.master_id = quic.master_id; /* uint32_t */
+  event.h3_accept.master_id = quic.local.cid_set.plaintext.master_id; /* uint32_t */
 
   h2o_to_quicly_conn.update(&event.h3_accept.conn_id, &event.h3_accept.master_id);
 
@@ -1977,7 +1926,7 @@ int trace_h2o__send_response_header(struct pt_regs *ctx) {
   return 0;
 }
 
-)";
+)__bfp__";
 
 static uint64_t time_milliseconds()
 {
@@ -2232,7 +2181,7 @@ struct quic_event_t {
     struct { // quicly:stream_send
       uint32_t master_id;
       int64_t at;
-      int64_t stream_id;
+      quicly_stream_id_t stream_id;
       uint64_t off;
       size_t len;
       int is_fin;
@@ -2240,7 +2189,7 @@ struct quic_event_t {
     struct { // quicly:stream_receive
       uint32_t master_id;
       int64_t at;
-      int64_t stream_id;
+      quicly_stream_id_t stream_id;
       uint64_t off;
       size_t len;
     } stream_receive;
@@ -2283,7 +2232,7 @@ struct quic_event_t {
     struct { // quicly:max_stream_data_send
       uint32_t master_id;
       int64_t at;
-      int64_t stream_id;
+      quicly_stream_id_t stream_id;
       uint64_t limit;
     } max_stream_data_send;
     struct { // quicly:max_stream_data_receive
@@ -2390,7 +2339,7 @@ struct quic_event_t {
     struct { // quicly:quictrace_send_stream
       uint32_t master_id;
       int64_t at;
-      int64_t stream_id;
+      quicly_stream_id_t stream_id;
       uint64_t off;
       size_t len;
       int fin;
