@@ -69,7 +69,7 @@ rename_map = {
     "latest": "latest-rtt",
 }
 
-re_flags = re.X | re.M | re.S
+re_xms = re.X | re.M | re.S
 whitespace = r'(?:/\*.*?\*/|\s+)'
 probe_decl = r'(?:\bprobe\s+(?:[a-zA-Z0-9_]+)\s*\([^\)]*\)\s*;)'
 d_decl = r'(?:\bprovider\s*(?P<provider>[a-zA-Z0-9_]+)\s*\{(?P<probes>(?:%s|%s)*)\})' % (
@@ -80,9 +80,9 @@ def parse_c_struct(path):
   content = path.read_text()
 
   st_map = OrderedDict()
-  for (st_name, st_content) in re.findall(r'struct\s+([a-zA-Z0-9_]+)\s*\{([^}]*)\}', content, flags=re_flags):
+  for (st_name, st_content) in re.findall(r'struct\s+([a-zA-Z0-9_]+)\s*\{([^}]*)\}', content, flags=re_xms):
     st = st_map[st_name] = OrderedDict()
-    for (ctype, name, is_array) in re.findall(r'(\w+[^;]*[\w\*])\s+([a-zA-Z0-9_]+)(\[\d+\])?;', st_content, flags=re_flags):
+    for (ctype, name, is_array) in re.findall(r'(\w+[^;]*[\w\*])\s+([a-zA-Z0-9_]+)(\[\d+\])?;', st_content, flags=re_xms):
       if "dummy" in name:
         continue
       st[name] = ctype + is_array
@@ -92,7 +92,7 @@ def parse_c_struct(path):
 def parse_d(context: dict, path: Path, allow_probes: set = None, block_probes: set = None):
   content = path.read_text()
 
-  matched = re.search(d_decl, content, flags=re_flags)
+  matched = re.search(d_decl, content, flags=re_xms)
   provider = matched.group('provider')
 
   st_map = context["st_map"]
@@ -100,8 +100,8 @@ def parse_d(context: dict, path: Path, allow_probes: set = None, block_probes: s
 
   id = context["id"]
 
-  for (name, args) in re.findall(r'\bprobe\s+([a-zA-Z0-9_]+)\(([^\)]+)\);', matched.group('probes'), flags=re_flags):
-    arg_list = re.split(r'\s*,\s*', args, flags=re_flags)
+  for (name, args) in re.findall(r'\bprobe\s+([a-zA-Z0-9_]+)\(([^\)]+)\);', matched.group('probes'), flags=re_xms):
+    arg_list = re.split(r'\s*,\s*', args, flags=re_xms)
     id += 1
 
     fully_specified_probe_name = "%s:%s" % (provider, name)
@@ -119,7 +119,7 @@ def parse_d(context: dict, path: Path, allow_probes: set = None, block_probes: s
     probe_metadata[name] = metadata
     args = metadata['args'] = list(map(
         lambda arg: re.match(
-            r'(?P<type>\w[^;]*[^;\s])\s*\b(?P<name>[a-zA-Z0-9_]+)', arg, flags=re_flags).groupdict(),
+            r'(?P<type>\w[^;]*[^;\s])\s*\b(?P<name>[a-zA-Z0-9_]+)', arg, flags=re_xms).groupdict(),
         arg_list))
 
     flat_args_map = metadata['flat_args_map'] = OrderedDict()
