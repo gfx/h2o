@@ -20,17 +20,47 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 
-# usage: gen-quic-bpf.py h2o_dir output_file
+# usage: gen-quic-bpf.py source_dir build_dir output_file
 
 import re
 import sys
+import os
+import subprocess
 from collections import OrderedDict
 from pathlib import Path
 from pprint import pprint
 
 quicly_probes_d = "deps/quicly/quicly-probes.d"
 h2o_probes_d = "h2o-probes.d"
-data_types_h = "h2olog/quic.h"
+
+pahole_command = (os.getenv("PAHOLE") or "pahole")
+
+# an arbitrary object file that includes necessary struct definitions
+object_file = "CMakeFiles/h2o.dir/lib/http3/common.c.o"
+
+type_defs = r"""
+typedef int64_t quicly_stream_id_t;
+"""
+
+struct_map = {
+    # deps/quicly/include/quicly.h
+    "st_quicly_stream_t": OrderedDict([
+        ("stream_id", ("quicly_stream_id_t", None)),
+    ]),
+
+    # deps/quicly/include/quicly/loss.h
+    "quicly_rtt_t": OrderedDict([
+        ("minimum", ("uint32_t", None)),
+        ("smoothed", ("uint32_t", None)),
+        ("variance", ("uint32_t", None)),
+        ("latest", ("uint32_t", None)),
+    ]),
+
+    # deps/quicly/lib/quicly.c
+    "st_quicly_conn_t": OrderedDict([
+        ("master_id", ("uint32_t", "local.cid_set.plaintext.master_id")),
+    ]),
+}
 
 block_fields = {
     "quicly:crypto_decrypt": set(["decrypted"]),
@@ -76,26 +106,12 @@ d_decl = r'(?:\bprovider\s*(?P<provider>[a-zA-Z0-9_]+)\s*\{(?P<probes>(?:%s|%s)*
     probe_decl, whitespace)
 
 
-def parse_c_struct(path):
-  content = path.read_text()
-
-  st_map = OrderedDict()
-  for (st_name, st_content) in re.findall(r'struct\s+([a-zA-Z0-9_]+)\s*\{([^}]*)\}', content, flags=re_xms):
-    st = st_map[st_name] = OrderedDict()
-    for (ctype, name, is_array) in re.findall(r'(\w+[^;]*[\w\*])\s+([a-zA-Z0-9_]+)(\[\d+\])?;', st_content, flags=re_xms):
-      if "dummy" in name:
-        continue
-      st[name] = ctype + is_array
-  return st_map
-
-
 def parse_d(context: dict, path: Path, allow_probes: set = None, block_probes: set = None):
   content = path.read_text()
 
   matched = re.search(d_decl, content, flags=re_xms)
   provider = matched.group('provider')
 
-  st_map = context["st_map"]
   probe_metadata = context["probe_metadata"]
 
   id = context["id"]
@@ -129,8 +145,8 @@ def parse_d(context: dict, path: Path, allow_probes: set = None, block_probes: s
       arg_type = arg['type']
 
       if is_ptr_type(arg_type) and not is_str_type(arg_type):
-        for st_key, st_valtype in st_map[strip_typename(arg_type)].items():
-          flat_args_map[st_key] = st_valtype
+        for st_event_fieldname, (st_fieldtype, _) in struct_map.get(strip_typename(arg_type), {}).items():
+          flat_args_map[st_event_fieldname] = st_fieldtype
       else:
         flat_args_map[arg_name] = arg_type
 
@@ -158,7 +174,6 @@ def build_tracer_name(metadata):
 
 
 def build_tracer(context, metadata):
-  st_map = context["st_map"]
   fully_specified_probe_name = metadata["fully_specified_probe_name"]
 
   c = r"""// %s
@@ -193,10 +208,12 @@ int %s(struct pt_regs *ctx) {
       c += "  %s %s = {};\n" % (arg_type.replace("*", ""), arg_name)
       c += "  bpf_usdt_readarg(%d, ctx, &buf);\n" % (i+1)
       c += "  bpf_probe_read(&%s, sizeof(%s), buf);\n" % (arg_name, arg_name)
-      for st_key, st_valtype in st_map[strip_typename(arg_type)].items():
-        event_t_name = "%s.%s" % (probe_name, st_key)
+      for st_fieldname, (st_fieldtype, st_real_fieldname) in struct_map.get(strip_typename(arg_type), {}).items():
+        if not st_real_fieldname:
+          st_real_fieldname = st_fieldname
+        event_t_name = "%s.%s" % (probe_name, st_fieldname)
         c += "  event.%s = %s.%s; /* %s */\n" % (
-            event_t_name, arg_name, st_key, st_valtype)
+            event_t_name, arg_name, st_real_fieldname, st_fieldtype)
     else:
       event_t_name = "%s.%s" % (probe_name, arg_name)
       c += "  bpf_usdt_readarg(%d, ctx, &event.%s);\n" % (i +
@@ -242,24 +259,67 @@ int %s(struct pt_regs *ctx) {
   return c
 
 
-def prepare_context(h2o_dir):
-  st_map = parse_c_struct(h2o_dir.joinpath(data_types_h))
+def prepare_context(source_dir, build_dir):
   context = {
       "id": 1,  # 1 is used for sched:sched_process_exit
       "probe_metadata": OrderedDict(),
-      "st_map": st_map,
-      "h2o_dir": h2o_dir,
+      "source_dir": source_dir,
+      "build_dir": build_dir,
   }
-  parse_d(context, h2o_dir.joinpath(quicly_probes_d),
+  parse_d(context, Path(source_dir, quicly_probes_d),
           block_probes=quicly_block_probes)
-  parse_d(context, h2o_dir.joinpath(h2o_probes_d),
+  parse_d(context, Path(source_dir, h2o_probes_d),
           allow_probes=h2o_allow_probes)
 
   return context
 
+def strip_c_comments(s):
+  # strip C comments
+  s = re.sub(r'//.*?\n | /\*.*?\*/[ ]* ', '', s, flags=re_xms)
+  # strip trailing whitespaces
+  s = re.sub(r'\s+$', '', s, flags=re_xms)
+  return s
+
+def shell(args):
+  proc = subprocess.run(
+    args=args,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    check=True,
+    universal_newlines=True,
+  )
+
+  return proc.stdout
+
+def extract_struct_definitions(context):
+  obj_file_path = str(Path(context["build_dir"], object_file))
+
+  st_names = set(struct_map.keys())
+
+  unresolved_st_names = st_names
+  while True:
+    # pahole(1) ignores undefined names in -C (--class_name)
+    st_defs = shell([pahole_command, "-q", "-C", ",".join(st_names), obj_file_path])
+    names = re.findall(r'\b(\w*(?:quicly|picotls|h2o)\w*_t)\b', st_defs, flags=re_xms)
+    user_defined_type_names = set(names + ["st_%s" % name for name in names if not re.search(r'^st_', name)])
+    unresolved_st_names = user_defined_type_names - st_names
+    st_names |= unresolved_st_names
+
+    if len(unresolved_st_names) == 0:
+      break
+
+  st_defs = shell([pahole_command, "-q", "-C", ",".join(st_names), obj_file_path])
+
+  typedefs = []
+  for st_fullname in set(re.findall(r'\bstruct\b \s+ \b(\w*(?:quicly|picotls|h2o)\w*_t)\b', st_defs, flags=re_xms)):
+    if re.search(r'^st_', st_fullname):
+      st_shortname = re.sub(r'^st_', '', st_fullname)
+      typedefs.append("typedef %s %s;" % (st_fullname, st_shortname))
+  typedefs.sort()
+
+  return "%s\n\n%s" % ("\n".join(typedefs), st_defs)
 
 def generate_cplusplus(context, output_file):
-  h2o_dir = context["h2o_dir"]
 
   probe_metadata = context["probe_metadata"]
 
@@ -298,11 +358,16 @@ struct quic_event_t {
   };
   """
 
+  st_defs = extract_struct_definitions(context)
+
   bpf = r"""
 #include <linux/sched.h>
 
 #define STR_LEN 64
+
 %s
+%s
+
 %s
 BPF_PERF_OUTPUT(events);
 
@@ -322,7 +387,7 @@ int trace_sched_process_exit(struct tracepoint__sched__sched_process_exit *ctx) 
   return 0;
 }
 
-""" % (h2o_dir.joinpath(data_types_h).read_text(), event_t_decl)
+""" % (type_defs, st_defs, event_t_decl)
 
   usdt_def = """
 static
@@ -409,15 +474,17 @@ void quic_handle_event(h2o_tracer_t *tracer, const void *data, int data_len) {
 """
   handle_event_func += "}\n"
 
-  Path(output_file).write_text(r"""// Generated code. Do not edit it here!
+  gen_cc = r"""// Generated code. Do not edit it here!
 
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
+
+#include "quicly.h"
+
 #include "h2olog.h"
-#include "quic.h"
 #include "json.h"
 
 #define STR_LEN 64
@@ -426,9 +493,9 @@ void quic_handle_event(h2o_tracer_t *tracer, const void *data, int data_len) {
 uint64_t seq = 0;
 
 // BPF modules written in C
-const char *bpf_text = R"(
+const char *bpf_text = R"__BPF__(
 %s
-)";
+)__BPF__";
 
 static uint64_t time_milliseconds()
 {
@@ -462,17 +529,18 @@ void init_quic_tracer(h2o_tracer_t * tracer) {
   tracer->bpf_text = quic_bpf_ext;
 }
 
-""" % (bpf, usdt_def, event_t_decl, handle_event_func))
+""" % (bpf, usdt_def, event_t_decl, handle_event_func)
 
+  Path(output_file).write_text(gen_cc)
 
 def main():
   try:
-    (_, h2o_dir, output_file) = sys.argv
+    (_, source_dir, build_dir, output_file) = sys.argv
   except:
-    print("usage: %s h2o_dir output_file" % sys.argv[0])
+    print("usage: %s source_dir build_dir output_file" % sys.argv[0])
     sys.exit(1)
 
-  context = prepare_context(Path(h2o_dir))
+  context = prepare_context(source_dir, build_dir)
   generate_cplusplus(context, output_file)
 
 
