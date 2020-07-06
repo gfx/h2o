@@ -36,10 +36,30 @@ h2o_probes_d = "h2o-probes.d"
 pahole_command = (os.getenv("PAHOLE") or "pahole")
 
 # an arbitrary object file that includes necessary struct definitions
-object_file = "CMakeFiles/h2o.dir/lib/http3/common.c.o"
+object_file = "CMakeFiles/h2o.dir/deps/quicly/lib/quicly.c.o"
 
 type_defs = r"""
 typedef int64_t quicly_stream_id_t;
+
+typedef enum {
+    /**
+     * initial state
+     */
+    QUICLY_SENDER_STATE_NONE,
+    /**
+     * to be sent. Changes to UNACKED when sent out by quicly_send
+     */
+    QUICLY_SENDER_STATE_SEND,
+    /**
+     * inflight. changes to SEND (when packet is deemed lost), or ACKED (when packet is ACKed)
+     */
+    QUICLY_SENDER_STATE_UNACKED,
+    /**
+     * the sent value acknowledged by remote peer
+     */
+    QUICLY_SENDER_STATE_ACKED,
+} quicly_sender_state_t;
+
 """
 
 struct_map = {
@@ -281,6 +301,8 @@ def strip_c_comments(s):
   return s
 
 def shell(args):
+  # print(">>> %s" % " ".join(args), file=sys.stderr)
+
   proc = subprocess.run(
     args=args,
     stdout=subprocess.PIPE,
@@ -309,12 +331,12 @@ def extract_struct_definitions(context):
       break
 
   st_defs = shell([pahole_command, "-q", "-C", ",".join(st_names), obj_file_path])
-
+  #pprint(st_names)
   typedefs = []
   for st_fullname in set(re.findall(r'\bstruct\b \s+ \b(\w*(?:quicly|picotls|h2o)\w*_t)\b', st_defs, flags=re_xms)):
     if re.search(r'^st_', st_fullname):
       st_shortname = re.sub(r'^st_', '', st_fullname)
-      typedefs.append("typedef %s %s;" % (st_fullname, st_shortname))
+      typedefs.append("typedef struct %s %s;" % (st_fullname, st_shortname))
   typedefs.sort()
 
   return "%s\n\n%s" % ("\n".join(typedefs), st_defs)

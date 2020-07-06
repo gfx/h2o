@@ -458,7 +458,7 @@ struct _st_quicly_conn_public_t {
     void *data;
 };
 
-typedef enum quicly_sender_state_t {
+typedef enum {
     /**
      * initial state
      */
