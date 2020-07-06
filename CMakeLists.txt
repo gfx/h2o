@@ -863,6 +863,8 @@ ENDIF ()
 IF (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND PKG_CONFIG_FOUND)
     PKG_CHECK_MODULES(LIBBCC libbcc)
 
+    # FIXME: check if pahole(1) is installed
+
     EXECUTE_PROCESS(
         COMMAND uname -r
         OUTPUT_VARIABLE KERNEL_VERSION
@@ -905,16 +907,10 @@ IF (WITH_H2OLOG)
         "include/h2o/version.h"
     )
 
-    SET(H2OLOG_GEN_DEPS
-        "h2o-probes.d"
-        "deps/quicly/quicly-probes.d"
-        "h2olog/quic.h"
-    )
-
     ADD_CUSTOM_COMMAND(
         OUTPUT  "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/generated-quic.cc"
-        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/misc/gen-quic-bpf.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/generated-quic.cc"
-        DEPENDS ${H2OLOG_GEN_DEPS} "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/misc/gen-quic-bpf.py"
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/misc/gen-quic-bpf.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/generated-quic.cc"
+        DEPENDS h2o "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/misc/gen-quic-bpf.py"
     )
     LIST(APPEND H2OLOG_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/h2olog/generated-quic.cc")
     LINK_DIRECTORIES("${LIBBCC_LIBRARY_DIRS}")
