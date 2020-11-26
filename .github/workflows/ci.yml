@@ -4,6 +4,7 @@ on: [push, pull_request]
 
 env:
   BUILD_TYPE: Debug
+  PERL5LIB: "-Mlib=${{runner.workspace}}/local/lib/perl5"
 
 jobs:
   macOS:
@@ -15,17 +16,23 @@ jobs:
     - name: Create Build Environment
       run: mkdir -p ${{runner.workspace}}/build
 
+    - name: Cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ${{runner.workspace}}/local
+        key: ${{ runner.os }}-${{ hashFiles('${{runner.workspace}}/cpanfile') }}
+
     - name: Install Dependencies
       run: |
-        brew install expect nghttp2 ccache cpm
+        brew install expect nghttp2 cpm
 
         # install curl 7.57.0 because t/50fastcgi.t depends on it.
-        sudo apt-get install --yes libnghttp2-dev
-    	  wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
-	      (cd curl-7.57.0 && ./configure --prefix=/usr/local --without-brotli --with-nghttp2 --disable-shared && make && sudo make install)
+        wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
+        (cd curl-7.57.0 && ./configure --prefix=/usr/local --without-brotli --with-nghttp2 --disable-shared && make && sudo make install)
 
     - name: Install CPAN Dependencies
-      run: cpm install --global
+      run: cpm install
 
     - name: Configure
       shell: bash
@@ -50,6 +57,13 @@ jobs:
 
     - name: Create Build Environment
       run: mkdir -p ${{runner.workspace}}/build
+
+    - name: Cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ${{runner.workspace}}/local
+        key: ${{ runner.os }}-${{ hashFiles('${{runner.workspace}}/cpanfile') }}
 
     - name: Install Dependencies
       run: |
@@ -89,8 +103,8 @@ jobs:
 
         # install curl 7.57.0 because t/50fastcgi.t depends on it.
         sudo apt-get install --yes libnghttp2-dev
-    	  wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
-	      (cd curl-7.57.0 && ./configure --prefix=/usr/local --without-brotli --with-nghttp2 --disable-shared && make && sudo make install)
+        wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
+        (cd curl-7.57.0 && ./configure --prefix=/usr/local --without-brotli --with-nghttp2 --disable-shared && make && sudo make install)
 
     - name: Install CPAN Dependencies
       run: |
