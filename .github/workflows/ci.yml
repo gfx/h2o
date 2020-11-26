@@ -51,8 +51,6 @@ jobs:
 
   fuzz:
     runs-on: [ubuntu-20.04]
-    env:
-      PERL5LIB: "-Mlib=${{runner.workspace}}/local/lib/perl5"
     steps:
     - uses: actions/checkout@v2
 
