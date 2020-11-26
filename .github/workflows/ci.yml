@@ -1,0 +1,118 @@
+name: CI
+
+on: [push, pull_request]
+
+env:
+  BUILD_TYPE: Debug
+
+jobs:
+  macOS:
+    runs-on: [macos-10.15]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Create Build Environment
+      run: mkdir -p ${{runner.workspace}}/build
+
+    - name: Install Homebrew Dependencies
+      run: brew install expect nghttp2 ccache cpm
+
+    - name: Install CPAN Dependencies
+      run: cpm install --global
+
+    - name: Configure
+      shell: bash
+      working-directory: ${{runner.workspace}}/build
+      run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+
+    - name: Build
+      working-directory: ${{runner.workspace}}/build
+      shell: bash
+      run: make all
+
+    - name: Test
+      working-directory: ${{runner.workspace}}/build
+      shell: bash
+      run: make check
+
+  fuzz:
+    runs-on: [ubuntu-20.04]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Create Build Environment
+      run: mkdir -p ${{runner.workspace}}/build
+
+    - name: Install APT Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes \
+          cmake \
+          cmake-data \
+          apache2-utils \
+          bison \
+          clang \
+          flex \
+          libbrotli-dev \
+          libc-ares-dev \
+          libclang-dev \
+          libedit-dev \
+          libelf-dev \
+          libev-dev \
+          libssl-dev \
+          libuv1-dev \
+          llvm-dev \
+          libllvm7 \
+          llvm-7-dev \
+          libclang-7-dev \
+          zlib1g-dev \
+          memcached \
+          netcat-openbsd \
+          nghttp2-client \
+          php-cgi \
+          pkgconf \
+          python3 \
+          python3-distutils \
+          redis-server \
+          ruby-dev \
+          systemtap-sdt-dev \
+          wget \
+          cpanminus
+
+    - name: Install CPAN Dependencies
+      run: |
+        cpanm --sudo --notest App::cpm
+        sudo cpm install --global
+
+    - name: Configure
+      shell: bash
+      working-directory: ${{runner.workspace}}/build
+      env:
+        CC: clang
+        CXX: clang++
+      run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUILD_FUZZER=ON
+
+    - name: Build
+      working-directory: ${{runner.workspace}}/build
+      shell: bash
+      run: make all
+
+    - name: Fuzzing
+      working-directory: ${{runner.workspace}}/build
+      shell: bash
+      env:
+        ASAN_OPTIONS: detect_leaks=0
+      run: |
+        ./h2o-fuzzer-http1 -close_fd_mask=3 -runs=1 -max_len=16384 $GITHUB_WORKSPACE/fuzz/http1-corpus < /dev/null
+        ./h2o-fuzzer-http2 -close_fd_mask=3 -runs=1 -max_len=16384 $GITHUB_WORKSPACE/fuzz/http2-corpus < /dev/null
+        ./h2o-fuzzer-url -close_fd_mask=3 -runs=1 -max_len=16384 $GITHUB_WORKSPACE/fuzz/url-corpus < /dev/null
+
+    - name: Test
+      working-directory: ${{runner.workspace}}/build
+      shell: bash
+      env:
+        ASAN_OPTIONS: detect_leaks=0
+      run: |
+        make check
