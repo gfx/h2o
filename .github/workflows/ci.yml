@@ -47,10 +47,7 @@ jobs:
     - name: Install CPAN Dependencies
       run: |
         perl -V
-        cpm --version
-        cpm install
-        pwd
-        ls
+        cpm install -L "${{runner.workspace}}"
 
     - name: Setup CCache
       run: |
@@ -71,6 +68,4 @@ jobs:
         PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
       run: |
         perl -V
-        pwd
-        ls
         make check
