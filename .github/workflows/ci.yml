@@ -32,7 +32,7 @@ jobs:
 
     - name: Install Dependencies
       run: |
-        brew install expect nghttp2 ccache
+        brew install expect nghttp2 ccache cpm
 
         # install curl 7.57.0 because t/50fastcgi.t depends on it.
         wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
@@ -41,8 +41,7 @@ jobs:
     - name: Install CPAN Dependencies
       run: |
         perl -V
-        # Avoid using homebrew to install App::cpm to ensure the correct perl binary is used
-        curl -sfL https://cpanmin.us | perl - --notest --sudo App::cpm
+        cpm --version
         cpm install
 
     - name: Setup CCache
@@ -69,96 +68,5 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Setup SSH session
-      uses: lhotari/action-upterm@v1
-
-    - name: Create Build Environment
-      run: mkdir -p ${{runner.workspace}}/build
-
-    - name: Cache
-      uses: actions/cache@v2
-      with:
-        path: |
-          ${{runner.workspace}}/local
-        key: ${{ runner.os }}-${{ hashFiles('cpanfile') }}
-
-    - name: Install Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install --yes \
-          ccache \
-          cmake \
-          cmake-data \
-          apache2-utils \
-          bison \
-          clang \
-          flex \
-          libbrotli-dev \
-          libc-ares-dev \
-          libclang-dev \
-          libedit-dev \
-          libelf-dev \
-          libev-dev \
-          libssl-dev \
-          libuv1-dev \
-          llvm-dev \
-          libllvm7 \
-          llvm-7-dev \
-          libclang-7-dev \
-          zlib1g-dev \
-          memcached \
-          netcat-openbsd \
-          nghttp2-client \
-          php-cgi \
-          pkgconf \
-          python3 \
-          python3-distutils \
-          redis-server \
-          ruby-dev \
-          systemtap-sdt-dev \
-          wget
-
-        # install curl 7.57.0 because t/50fastcgi.t depends on it.
-        sudo apt-get install --yes libnghttp2-dev
-        wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
-        (cd curl-7.57.0 && ./configure --prefix=/usr/local --without-brotli --with-nghttp2 --disable-shared && make && sudo make install)
-
-    - name: Install CPAN Dependencies
-      run: |
-        perl -V
-        curl -sfL https://cpanmin.us | perl - --notest --sudo App::cpm
-        cpm install
-
-    - name: Setup CCache
-      run: |
-        echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
-        ccache --zero-stats
-
-    - name: Configure
-      working-directory: ${{runner.workspace}}/build
-      env:
-        CC: clang
-        CXX: clang++
-      run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUILD_FUZZER=ON
-
-    - name: Build
-      working-directory: ${{runner.workspace}}/build
-      run: make all
-
-    - name: Fuzzing
-      working-directory: ${{runner.workspace}}/build
-      env:
-        ASAN_OPTIONS: detect_leaks=0
-      run: |
-        ./h2o-fuzzer-http1 -close_fd_mask=3 -runs=1 -max_len=16384 $GITHUB_WORKSPACE/fuzz/http1-corpus < /dev/null
-        ./h2o-fuzzer-http2 -close_fd_mask=3 -runs=1 -max_len=16384 $GITHUB_WORKSPACE/fuzz/http2-corpus < /dev/null
-        ./h2o-fuzzer-url -close_fd_mask=3 -runs=1 -max_len=16384 $GITHUB_WORKSPACE/fuzz/url-corpus < /dev/null
-
-    - name: Test
-      working-directory: ${{runner.workspace}}/build
-      shell: bash
-      env:
-        ASAN_OPTIONS: detect_leaks=0
-        PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
-      run: |
-        make check
+    - run:
+      make -f misc/docker-ci/check.mk fuzz
