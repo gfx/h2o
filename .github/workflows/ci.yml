@@ -47,7 +47,7 @@ jobs:
     - name: Install CPAN Dependencies
       run: |
         perl -V
-        cpm install -L "${{runner.workspace}}"
+        cpm install -L "${{runner.workspace}}/local"
 
     - name: Setup CCache
       run: |
