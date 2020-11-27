@@ -19,7 +19,7 @@ jobs:
       with:
         path: |
           ${{runner.workspace}}/local
-        key: ${{ runner.os }}-${{ hashFiles('${{runner.workspace}}/cpanfile') }}
+        key: ${{ runner.os }}-${{ hashFiles('cpanfile') }}
 
     - name: Install Dependencies
       run: |
@@ -62,7 +62,7 @@ jobs:
       with:
         path: |
           ${{runner.workspace}}/local
-        key: ${{ runner.os }}-${{ hashFiles('${{runner.workspace}}/cpanfile') }}
+        key: ${{ runner.os }}-${{ hashFiles('cpanfile') }}
 
     - name: Install Dependencies
       run: |
