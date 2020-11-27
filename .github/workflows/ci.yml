@@ -16,23 +16,37 @@ jobs:
     - name: Create Build Environment
       run: mkdir -p ${{runner.workspace}}/build
 
-    - name: Cache
+    - name: Cache CPAN Dependencies
       uses: actions/cache@v2
       with:
         path: |
           ${{runner.workspace}}/local
-        key: ${{ runner.os }}-${{ hashFiles('cpanfile') }}
+        key: cpan-${{ runner.os }}-${{ hashFiles('cpanfile') }}
+
+    - name: Cache CCache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ${{runner.workspace}}/.ccache
+        key: ccache-${{ runner.os }}
 
     - name: Install Dependencies
       run: |
-        brew install expect nghttp2 cpm tree
+        brew install expect nghttp2 cpm ccache
 
         # install curl 7.57.0 because t/50fastcgi.t depends on it.
         wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
         (cd curl-7.57.0 && ./configure --prefix=/usr/local --without-brotli --with-nghttp2 --disable-shared && make && sudo make install)
 
     - name: Install CPAN Dependencies
-      run: cpm install && tree local
+      run: cpm install
+
+    - name: Setup CCache
+      run: |
+        echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
+        ccache --set-config compression=true
+        ccache --set-config compression_level=1
+        ccache --zero-stats
 
     - name: Configure
       working-directory: ${{runner.workspace}}/build
@@ -67,6 +81,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install --yes \
+          ccache \
           cmake \
           cmake-data \
           apache2-utils \
@@ -108,6 +123,13 @@ jobs:
       run: |
         cpanm --sudo --notest App::cpm
         sudo cpm install
+
+    - name: Setup CCache
+      run: |
+        echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
+        ccache --set-config compression=true
+        ccache --set-config compression_level=1
+        ccache --zero-stats
 
     - name: Configure
       working-directory: ${{runner.workspace}}/build
