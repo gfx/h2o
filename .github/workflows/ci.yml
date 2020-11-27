@@ -56,6 +56,9 @@ jobs:
       working-directory: ${{runner.workspace}}/build
       run: make all
 
+    - name: Setup SSH session
+      uses: lhotari/action-upterm@v1
+
     - name: Test
       working-directory: ${{runner.workspace}}/build
       env:
