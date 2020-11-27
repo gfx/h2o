@@ -46,7 +46,7 @@ jobs:
       working-directory: ${{runner.workspace}}/build
       shell: bash
       env:
-        PERL5LIB: "-Mlib=${GITHUB_WORKSPACE}/local/lib/perl5"
+        PERL5LIB: "-Mlib=${{runner.workspace}}/local/lib/perl5"
       run: make check
 
   fuzz:
@@ -137,7 +137,7 @@ jobs:
       working-directory: ${{runner.workspace}}/build
       shell: bash
       env:
-        PERL5LIB: "-Mlib=${GITHUB_WORKSPACE}/local/lib/perl5"
+        PERL5LIB: "-Mlib=${{runner.workspace}}/local/lib/perl5"
         ASAN_OPTIONS: detect_leaks=0
       run: |
         make check
