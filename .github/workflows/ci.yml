@@ -35,18 +35,16 @@ jobs:
       run: cpm install
 
     - name: Configure
-      shell: bash
       working-directory: ${{runner.workspace}}/build
       run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
     - name: Build
       working-directory: ${{runner.workspace}}/build
-      shell: bash
       run: make all
 
     - name: Test
-      working-directory: ${{runner.workspace}}/build
-      shell: bash
+      env:
+        PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
       run: make check
 
   fuzz:
@@ -111,7 +109,6 @@ jobs:
         sudo cpm install
 
     - name: Configure
-      shell: bash
       working-directory: ${{runner.workspace}}/build
       env:
         CC: clang
@@ -120,12 +117,10 @@ jobs:
 
     - name: Build
       working-directory: ${{runner.workspace}}/build
-      shell: bash
       run: make all
 
     - name: Fuzzing
       working-directory: ${{runner.workspace}}/build
-      shell: bash
       env:
         ASAN_OPTIONS: detect_leaks=0
       run: |
@@ -138,5 +133,6 @@ jobs:
       shell: bash
       env:
         ASAN_OPTIONS: detect_leaks=0
+        PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
       run: |
         make check
