@@ -45,8 +45,6 @@ jobs:
     - name: Test
       working-directory: ${{runner.workspace}}/build
       shell: bash
-      env:
-        PERL5LIB: "-Mlib=${{runner.workspace}}/local/lib/perl5"
       run: make check
 
   fuzz:
@@ -108,7 +106,7 @@ jobs:
     - name: Install CPAN Dependencies
       run: |
         cpanm --sudo --notest App::cpm
-        sudo cpm install --global
+        sudo cpm install
 
     - name: Configure
       shell: bash
@@ -137,7 +135,6 @@ jobs:
       working-directory: ${{runner.workspace}}/build
       shell: bash
       env:
-        PERL5LIB: "-Mlib=${{runner.workspace}}/local/lib/perl5"
         ASAN_OPTIONS: detect_leaks=0
       run: |
         make check
