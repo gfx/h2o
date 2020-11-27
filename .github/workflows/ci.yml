@@ -46,8 +46,6 @@ jobs:
     - name: Setup CCache
       run: |
         echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
-        ccache --set-config compression=true
-        ccache --set-config compression_level=1
         ccache --zero-stats
 
     - name: Configure
@@ -130,8 +128,6 @@ jobs:
     - name: Setup CCache
       run: |
         echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
-        ccache --set-config compression=true
-        ccache --set-config compression_level=1
         ccache --zero-stats
 
     - name: Configure
