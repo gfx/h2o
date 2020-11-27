@@ -10,7 +10,9 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Run with Docker
-      run: make -f misc/docker-ci/check.mk fuzz
+      run: |
+        chmod -R ugo+w .
+        make -f misc/docker-ci/check.mk fuzz
 
   macOS:
     runs-on: [macos-10.15]
