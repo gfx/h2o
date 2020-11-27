@@ -65,4 +65,6 @@ jobs:
       working-directory: ${{runner.workspace}}/build
       env:
         PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
-      run: make check
+      run: |
+        perl -V
+        make check
