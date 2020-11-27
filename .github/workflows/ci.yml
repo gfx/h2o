@@ -69,4 +69,6 @@ jobs:
         PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
       run: |
         perl -V
+        ls "${{runner.workspace}}/local/lib/perl5"
+        ls "$GITHUB_WORKSPACE/local/lib/perl5"
         make check
