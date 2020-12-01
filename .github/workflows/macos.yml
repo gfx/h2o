@@ -46,6 +46,7 @@ jobs:
       run: make all
 
     - name: Test
+      timeout-minutes: 60
       working-directory: ${{runner.workspace}}/build
       env:
         PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
