@@ -1,4 +1,4 @@
-name: CI
+name: CI/macOS
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  macOS:
+  build:
     runs-on: [macos-10.15]
     steps:
     - uses: actions/checkout@v2
