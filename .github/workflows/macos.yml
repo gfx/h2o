@@ -30,7 +30,7 @@ jobs:
 
         # install curl 7.57.0 because t/50fastcgi.t depends on it.
         wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
-        (cd curl-7.57.0 && ./configure --prefix=/usr/local --without-brotli --with-nghttp2 --disable-shared && make && sudo make install)
+        (cd curl-7.57.0 && ./configure --prefix=/usr/local --with-darwinssl --without-brotli --with-nghttp2 --disable-shared && make && make install)
 
     - name: Install CPAN Dependencies
       run: |
