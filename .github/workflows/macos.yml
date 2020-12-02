@@ -45,6 +45,10 @@ jobs:
       working-directory: ${{runner.workspace}}/build
       run: make all
 
+    - name: Build CheckDepends
+      working-directory: ${{runner.workspace}}/build
+      run: make checkdepends
+
     - name: Test
       timeout-minutes: 60
       working-directory: ${{runner.workspace}}/build
