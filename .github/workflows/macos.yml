@@ -30,15 +30,14 @@ jobs:
 
     - name: Install cURL
       run: |
+        set -x
         # install curl 7.57.0 because t/50fastcgi.t depends on it.
         wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
         cd curl-7.57.0
-        ./configure --prefix=/usr/local --with-darwinssl --without-brotli --with-nghttp2 --disable-shared --disable-manual
+        ./configure --prefix=$HOME --with-darwinssl --without-brotli --with-nghttp2 --disable-shared --disable-manual
         make
         make install
-        hash -r
-        which curl
-        curl --version
+        $HOME/bin/curl --version
 
     - name: Install CPAN Dependencies
       run: |
@@ -62,4 +61,9 @@ jobs:
       working-directory: ${{runner.workspace}}/build
       env:
         PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
-      run: make check VERBOSE=1
+      run: |
+        set -x
+        # look up $HOME/bin first for the custom curl
+        export PATH="$HOME/bin:$PATH"
+        echo $PATH
+        make check VERBOSE=1
