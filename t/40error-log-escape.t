@@ -7,8 +7,8 @@ use File::Temp qw(tempfile);
 
 my ($ignored, $fn) = tempfile(UNLINK => 1);
 
-plan skip_all => 'curl not found'
-    unless prog_exists('curl') and curl_supports_http2();
+plan skip_all => 'curl not found' unless prog_exists('curl');
+plan skip_all => 'curl does not support HTTP/2' unless curl_supports_http2();
 
 my $upstream_port = empty_port();
 my $server = spawn_h2o(<< "EOT");
