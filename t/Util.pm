@@ -13,6 +13,7 @@ use Path::Tiny;
 use Protocol::HTTP2::Connection;
 use Protocol::HTTP2::Constants;
 use Scope::Guard qw(scope_guard);
+use Test::More;
 use Time::HiRes qw(sleep gettimeofday tv_interval);
 use if $ENV{GITHUB_ACTIONS}, "Test2::Plugin::GitHub::Actions::AnnotateFailedTest";
 
