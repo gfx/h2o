@@ -18,4 +18,6 @@ on "test" => sub {
   requires "Path::Tiny";
   requires "Test::Exception";
   requires "Test::TCP", "== 2.21";
+
+  recommends "Test2::Plugin::GitHub::Actions::AnnotateFailedTest";
 };
