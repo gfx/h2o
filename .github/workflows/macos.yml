@@ -42,7 +42,7 @@ jobs:
     - name: Install CPAN Dependencies
       run: |
         perl -V
-        cpm install --show-build-log-on-failure -L "${{runner.workspace}}/local"
+        cpm install --with-recommends --show-build-log-on-failure -L "${{runner.workspace}}/local"
 
     - name: Configure
       working-directory: ${{runner.workspace}}/build
