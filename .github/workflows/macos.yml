@@ -37,7 +37,7 @@ jobs:
         ./configure --prefix=$HOME --with-darwinssl --without-brotli --with-nghttp2 --disable-shared --disable-manual
         make
         make install
-        $HOME/bin/curl --version
+        echo "$HOME/bin" >> $GITHUB_PATH
 
     - name: Install CPAN Dependencies
       run: |
@@ -63,7 +63,5 @@ jobs:
         PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
       run: |
         set -x
-        # look up $HOME/bin first for the custom curl
-        export PATH="$HOME/bin:$PATH"
-        echo $PATH
-        make check VERBOSE=1
+        curl --version
+        make check
