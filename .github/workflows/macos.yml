@@ -57,7 +57,7 @@ jobs:
       run: make checkdepends
 
     - name: Test
-      timeout-minutes: 90
+      timeout-minutes: 120
       working-directory: ${{runner.workspace}}/build
       env:
         PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
