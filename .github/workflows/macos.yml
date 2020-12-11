@@ -19,7 +19,7 @@ jobs:
 
     - name: Setup Problem Matchers
       run: |
-        echo "::add-matcher::tap-problem-matcher.json"
+        echo "::add-matcher::.github/tap-problem-matcher.json"
 
     - name: Cache CPAN Dependencies
       uses: actions/cache@v2
