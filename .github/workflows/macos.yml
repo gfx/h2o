@@ -17,6 +17,10 @@ jobs:
     - name: Create Build Environment
       run: mkdir -p ${{runner.workspace}}/build
 
+    - name: Setup Problem Matchers
+      run: |
+        echo "::add-matcher::tap-problem-matcher.json"
+
     - name: Cache CPAN Dependencies
       uses: actions/cache@v2
       with:
@@ -64,5 +68,4 @@ jobs:
       run: |
         set -x
         curl --version
-        echo "::add-matcher::${{runner.workspace}}/.github/tap-problem-matcher.json"
         make check
