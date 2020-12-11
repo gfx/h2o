@@ -4,17 +4,16 @@
       "owner": "tap-problem-matcher",
       "pattern": [
         {
-          "regexp": "^\\s*(#\\s+Failed test .*)",
-          "message": 1
+          "regexp": "^\\s*#\\s+Failed test '(.*)'$",
+          "code": 1
         },
         {
-          "regexp": "^\\s*(#\\s+at (\\S+) line (\\d+)\\.)",
-          "message": 1,
-          "file": 2,
-          "line": 3
+          "regexp": "^\\s*#\\s+at (\\S+) line (\\d+)\\.",
+          "file": 1,
+          "line": 2
         },
         {
-          "regexp": "^\\s*(#.*)",
+          "regexp": "^\\s*#(.*)",
           "message": 1,
           "loop": true
         }
