@@ -5,6 +5,7 @@ on: [push, pull_request]
 jobs:
   build:
     name: "${{ matrix.type }}"
+    runs-on: [ubuntu-20.04]
 
     # We want to run on external PRs, but not on our own internal PRs as they'll be run
     # by the push to the branch.
@@ -20,7 +21,7 @@ jobs:
           - DTrace
         include:
           - type: default
-            task: ""
+            task: ALL
           - type: OpenSSL 1.1.0
             task: ossl1.1.0
           - type: OpenSSL 1.1.1
@@ -29,7 +30,6 @@ jobs:
             task: dtrace
             container: h2oserver/h2o-ci:ubuntu2004
 
-    runs-on: [ubuntu-20.04]
     steps:
     - uses: actions/checkout@v2
       with:
