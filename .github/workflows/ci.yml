@@ -4,23 +4,30 @@ on: [push, pull_request]
 
 jobs:
   build:
-    name: "${{ matrix.task }}"
-
-    strategy:
-      fail-fast: false
-      matrix:
-        task:
-          - default
-          - ossl1.1.1
-          - ossl1.1.0
-          - dtrace
-        include:
-          - task: dtrace
-            container: h2oserver/h2o-ci:ubuntu2004
+    name: "${{ matrix.type }}"
 
     # We want to run on external PRs, but not on our own internal PRs as they'll be run
     # by the push to the branch.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+
+    strategy:
+      fail-fast: false
+      matrix:
+        type:
+          - default
+          - OpenSSL 1.1.0
+          - OpenSSL 1.1.1
+          - DTrace
+        include:
+          - type: default
+            task: ""
+          - type: OpenSSL 1.1.0
+            task: ossl1.1.0
+          - type: OpenSSL 1.1.1
+            task: ossl1.1.1
+          - type: DTrace
+            task: dtrace
+            container: h2oserver/h2o-ci:ubuntu2004
 
     runs-on: [ubuntu-20.04]
     steps:
