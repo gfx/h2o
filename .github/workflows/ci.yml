@@ -41,4 +41,4 @@ jobs:
         CONTAINER_NAME: ${{ matrix.container }}
       run: |
         chmod -R ugo+w .
-        make -f misc/docker-ci/check.mk "${{ matrix.task }}"
+        make -f misc/docker-ci/check.mk ${{ matrix.task }}
