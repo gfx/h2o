@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 jobs:
   build:
-    name: "${{ matrix.type }}"
+    name: "${{ matrix.type || "NA" }}"
     runs-on: [ubuntu-20.04]
 
     # We want to run on external PRs, but not on our own internal PRs as they'll be run
