@@ -1,0 +1,56 @@
+name: CI / macOS
+
+on: [push, pull_request]
+
+jobs:
+  default:
+    name: default
+    runs-on: [macos-10.15]
+
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: recursive
+
+    - name: Create Build Environment
+      run: mkdir -p ${{runner.workspace}}/build
+
+    - name: Install Dependencies
+      run: |
+        brew install expect nghttp2 cpm ruby bison
+    - name: Install cURL
+      run: |
+        set -x
+        # install curl 7.57.0 because t/50fastcgi.t depends on it.
+        wget --no-verbose -O - https://curl.haxx.se/download/curl-7.57.0.tar.gz | tar xzf -
+        cd curl-7.57.0
+        ./configure --prefix=$HOME --with-darwinssl --without-brotli --with-nghttp2 --disable-shared --disable-manual
+        make
+        make install
+        echo "$HOME/bin" >> $GITHUB_PATH
+    - name: Install CPAN Dependencies
+      run: |
+        perl -V
+        cpm install --with-recommends --show-build-log-on-failure -L "${{runner.workspace}}/local"
+    - name: Configure
+      working-directory: ${{runner.workspace}}/build
+      run: cmake -DCMAKE_BUILD_TYPE=Debug -B. $GITHUB_WORKSPACE
+
+    - name: Build All
+      working-directory: ${{runner.workspace}}/build
+      run: make all
+
+    - name: Build CheckDepends
+      working-directory: ${{runner.workspace}}/build
+      run: make checkdepends
+
+    - name: Test
+      timeout-minutes: 120
+      working-directory: ${{runner.workspace}}/build
+      shell: 'unbuffer bash -xe {0}'
+      env:
+        PERL5OPT: "-Mlib=${{runner.workspace}}/local/lib/perl5"
+      run: |
+        make check
